@@ -7,11 +7,13 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include "../raspicam-0.1.3/src/raspicam.h"
+#include "../raspicam-0.1.3/src/raspicam_cv.h"
 #include <iostream>
 #include <fstream>
 
 using namespace cv;
 using namespace std;
+using namespace raspicam;
 
 Mat src;
 Mat src_gray;
@@ -22,33 +24,28 @@ RNG rng(12345);
 void thresh_callback(int, void*);
 
 int main() {
-	raspicam::RaspiCam Camera(); //Camera object
+	RaspiCam_Cv Camera; //Camera object
 	Camera.open();
 	Camera.grab();
-	unsigned char *data=new unsigned char[ Camera.getImageTypeSize (raspicam::RASPICAM_FORMAT_BGR )];
-	Camera.retrieve (data,raspicam::RASPICAM_FORMAT_BGR);
-	std::ofstream outFilef("raspicam_image.ppm",std::ios::binary);
-	outFile<<"P6\n"<<Camera.getWidth() << " " <<Camera.getHeight() <<" 255/n";
-	outFile.write( (char*) data, Camera.getImageTypeSize (raspicam::RASPICAM_FORMAT_BGR));
-
-	VideoCapture videostream(0);
-	videostream.open(0);
-	while(1) {
+	for(int x=0; x < 1; x++) {
 		Mat streamimage;
+		Camera.retrieve(streamimage);
 		Mat hsvimage;
 		Mat inrange;
-		bool captured = videostream.read(streamimage);
-		if (videostream.isOpened()) {
+		if(Camera.isOpened()){
 			cout<<"Opened Camera"<< endl;
-			Scalar lower = Scalar(100, 255, 255);
-			Scalar upper = Scalar(255, 255, 255);
+			Scalar lower = Scalar(0, 0, 100);
+			Scalar upper = Scalar(180, 255, 255);
 			cvtColor(streamimage, hsvimage, CV_BGR2HSV);
 			inRange(hsvimage, lower, upper, inrange);
+			cv::imwrite("rapspicam1.jpg", streamimage);
+			cv::imwrite("raspicam_pic.jpg",inrange);
 		} else {
 			cout << "Failed to opfdsfdsaen camera" << endl;
 			break;
 		}
 	}
+	Camera.release();
 	return 0;
 }
 
