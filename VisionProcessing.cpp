@@ -25,6 +25,7 @@ int max_thresh = 255;
 RNG rng(12345);
 
 void contouringstuffs(Mat inrange);
+bool compareContourAreas( std::vector<cv::Point> contour1, std::vector<cv::Point> contour2 );
 
 int main() {
 	RaspiCam_Cv Camera; //Camera object
@@ -37,7 +38,7 @@ int main() {
 		Camera.retrieve(streamimage);
 		if(Camera.isOpened()){
 			cout<<"Opened Camera"<< endl;
-			Scalar lower = Scalar(0, 0, 100);
+			Scalar lower = Scalar(0, 0, 80);
 			Scalar upper = Scalar(180, 255, 255);
 			cvtColor(streamimage, hsvimage, CV_BGR2HSV);
 			inRange(hsvimage, lower, upper, inrange); 
@@ -60,14 +61,20 @@ void contouringstuffs(Mat inrange)
 	vector<Vec4i> hierarchy;
 	findContours(inrange, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE);
 	 Mat drawing = Mat::zeros( inrange.size(), CV_8UC3 );
-
-  	for( size_t i = 0; i< contours.size(); i++ )
-     {
+	//Returns array sorted smallest to biggest
+	std::sort(contours.begin(), contours.end(), compareContourAreas);
+     
        Scalar color = Scalar(rng.uniform(0, 255),rng.uniform(0,255), rng.uniform(0,255) );
-       drawContours( drawing, contours, (int)i , color, 2, 8, hierarchy, 0);
-     } 
+       drawContours( drawing, contours,(contours.size()-1), color, 2, 8, hierarchy, 0);
+	drawContours( drawing, contours, (contours.size()-2), color, 2, 8, hierarchy, 0);
+
 	cv::imwrite("contourImage.jpg", drawing);
 	
 }
 
-
+//Used with sort
+bool compareContourAreas ( std::vector<cv::Point> contour1, std::vector<cv::Point> contour2 ) {
+    double i = fabs( contourArea(cv::Mat(contour1)) );
+    double j = fabs( contourArea(cv::Mat(contour2)) );
+    return ( i < j );
+}
