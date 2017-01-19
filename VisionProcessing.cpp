@@ -6,10 +6,13 @@
  */
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
 #include "../raspicam-0.1.3/src/raspicam.h"
 #include "../raspicam-0.1.3/src/raspicam_cv.h"
 #include <iostream>
 #include <fstream>
+#include <stdlib.h>
+#include <stdio.h>
 
 using namespace cv;
 using namespace std;
@@ -21,69 +24,50 @@ int thresh = 100;
 int max_thresh = 255;
 RNG rng(12345);
 
-void thresh_callback(int, void*);
+void contouringstuffs(Mat inrange);
 
 int main() {
 	RaspiCam_Cv Camera; //Camera object
+	Mat streamimage;
+	Mat hsvimage;
+	Mat inrange;
 	Camera.open();
 	Camera.grab();
 	for(int x=0; x < 1; x++) {
-		Mat streamimage;
 		Camera.retrieve(streamimage);
-		Mat hsvimage;
-		Mat inrange;
 		if(Camera.isOpened()){
 			cout<<"Opened Camera"<< endl;
 			Scalar lower = Scalar(0, 0, 100);
 			Scalar upper = Scalar(180, 255, 255);
 			cvtColor(streamimage, hsvimage, CV_BGR2HSV);
-			inRange(hsvimage, lower, upper, inrange);
+			inRange(hsvimage, lower, upper, inrange); 
 			cv::imwrite("rapspicam1.jpg", streamimage);
 			cv::imwrite("raspicam_pic.jpg",inrange);
 		} else {
-			cout << "Failed to opfdsfdsaen camera" << endl;
+			cout << "Failed to open camera" << endl;
 			break;
 		}
 	}
+	
+	contouringstuffs(inrange);
 	Camera.release();
 	return 0;
 }
 
-void thresh_callback(int, void*) {
-	Mat canny_output;
+void contouringstuffs(Mat inrange)
+{
 	vector<vector<Point> > contours;
 	vector<Vec4i> hierarchy;
+	findContours(inrange, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE);
+	 Mat drawing = Mat::zeros( inrange.size(), CV_8UC3 );
 
-//Detect edges using canny
-	Canny(src_gray, canny_output, thresh, thresh * 2, 3);
-
-//Find contours
-	findContours(canny_output, contours, hierarchy, CV_RETR_TREE,
-			CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
-
-//Get moments
-	vector<Moments> mu(contours.size());
-	vector<Moments> biggest(2);
-	Moments zero = Moments();
-	zero.m00 = 0;
-	biggest[0] = zero;
-	biggest[1] = zero;
-	for (unsigned int i = 0; i < contours.size(); i++) {
-		mu[i] = moments(contours[i], false);
-		if (mu[i].m00 > biggest[0].m00) {
-			biggest[1] = biggest[0];
-			biggest[0] = mu[i];
-		} else if (mu[i].m00 > biggest[1].m00) {
-			biggest[1] = mu[i];
-		}
-	}
-	Point2d p0;
-	Point2d p1;
-	if (biggest[1].m00 > 300) {
-		p0 = Point2d(biggest[0].m10/biggest[0].m00, biggest[0].m01/biggest[0].m00);
-		p1 = Point2d(biggest[1].m10/biggest[1].m00, biggest[1].m01/biggest[1].m00);
-	}
-	cout << "x0 " << p0.x << "y0 " << p0.y << endl;
-	cout << "x1 " << p1.x << "y1 " << p1.y << endl;
+  	for( size_t i = 0; i< contours.size(); i++ )
+     {
+       Scalar color = Scalar(rng.uniform(0, 255),rng.uniform(0,255), rng.uniform(0,255) );
+       drawContours( drawing, contours, (int)i , color, 2, 8, hierarchy, 0);
+     } 
+	cv::imwrite("contourImage.jpg", drawing);
+	
 }
+
 
