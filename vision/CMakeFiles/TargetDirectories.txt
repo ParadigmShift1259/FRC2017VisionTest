@@ -1,0 +1,3 @@
+/home/pi/vision/CMakeFiles/edit_cache.dir
+/home/pi/vision/CMakeFiles/rebuild_cache.dir
+/home/pi/vision/CMakeFiles/VisionProcessing.dir
