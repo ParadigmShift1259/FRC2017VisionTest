@@ -15,14 +15,25 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <thread>
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <termios.h>
+#include <unistd.h>
+#include <stdint.h>
 
 using namespace cv;
 using namespace std;
 using namespace raspicam;
 
+const char* const  portname = "/dev/ttyAMA0";
+int32_t globalX;
+bool notOld;
+int fd;
+
 shared_ptr<NetworkTable> netTable;
-Scalar lower = Scalar(0, 0, 80);
-Scalar upper = Scalar(180, 255, 255);
+Scalar lower = Scalar(40, 100, 100);
+Scalar upper = Scalar(55, 255, 255);
 Mat frame;
 RaspiCam_Cv Camera; //Camera object
 Mat streamimage;
@@ -32,11 +43,15 @@ vector<vector<Point> > contours;
 vector<Vec4i> hierarchy;
 Mat drawing;
 
-RNG rng(12345);
+Scalar contourColor1 = Scalar(124,252,0);
+Scalar contourColor2 = Scalar(180,105,255);
+
+int set_interface_attribs(int fd, int speed, int parity);
+void set_blocking(int fd, int should_block);
 
 void grabframe();
 //draws 2 largest contours and returns said two largest contours in a vector of contours
-vector<vector<Point> > contouringstuffs();
+void contouringstuffs();
 //used with sort in contouringstuffs
 bool compareContourAreas( std::vector<cv::Point> contour1, std::vector<cv::Point> contour2 );
 //gets mentioned point from a specific contour
@@ -46,27 +61,38 @@ cv::Point getTopmost(vector<cv::Point> newContour);
 cv::Point getBotmost(vector<cv::Point> newContour);
 //gets the x value between two contours and then returns the amount of pixels that the bot is off
 int getCenteredX(vector<vector<Point> > twoContours);
+void sendData();
 
 int main() {
 	Camera.open();
-	for(int i = 0; i < 20; i++)
-	{
+	for(int i = 0; i < 20; i++) {
 		Camera.grab();
 	}
 	Camera.retrieve(frame);
-	cv::imwrite("firstframe.jpg",frame);
+//	cv::imwrite("firstframe.jpg",frame);
 	NetworkTable::SetClientMode();
 	NetworkTable::SetIPAddress("roboRIO-1259-FRC.local");
 	netTable = NetworkTable::GetTable("OpenCV");
+	int fd = open (portname, O_RDWR | O_NOCTTY | O_SYNC);
+	if (fd < 0)
+	{
+        	cerr << "error " << errno << " opening :" << portname << strerror(errno);
+        	return -1;
+	}
+
+	set_interface_attribs (fd, B115200, 0);  // set speed to 115,200 bps, 8n1 (no parity)
+	set_blocking (fd, 0);                // set no blocking
+
 	if(Camera.isOpened()){
 		thread first (grabframe);
-		cout<<"Opened Camera"<< endl;
+		cerr <<"Opened Camera"<< endl;
 		while (frame.empty());
 		thread second (contouringstuffs);
+		thread third (sendData);
 		first.join();
 		second.join();
 	} else {
-		cout << "Failed to open camera" << endl;
+		cerr << "Failed to open camera" << endl;
 	}
 
 	Camera.release();
@@ -75,20 +101,20 @@ int main() {
 
 void grabframe()
 {
-	while(true){
+	while(true) {
 		Camera.grab();
         	Camera.retrieve(frame);
 	}
 }
 
 
-vector<vector<Point> > contouringstuffs()
-{
-	while(true){
+void contouringstuffs() {
+	while(true) {
+		blur(frame,frame,Size(3,3));
 		cvtColor(frame, hsvimage, CV_BGR2HSV);
 		inRange(hsvimage, lower, upper, inrange);
-		cv::imwrite("rapspicam1.jpg", frame);
-		cv::imwrite("raspicam_pic.jpg",inrange);
+//		cv::imwrite("rapspicam1.jpg", frame);
+//		cv::imwrite("raspicam_pic.jpg",inrange);
 
 		findContours(inrange, contours, hierarchy, RETR_LIST, CHAIN_APPROX_SIMPLE);
 
@@ -96,44 +122,61 @@ vector<vector<Point> > contouringstuffs()
 		//Returns array sorted smallest to biggest
 		std::sort(contours.begin(), contours.end(), compareContourAreas);
 
-	        Scalar color = Scalar(rng.uniform(0, 255),rng.uniform(0,255), rng.uniform(0,255) );
-       		drawContours( drawing, contours,(contours.size()-1), color, 2, 8, hierarchy, 0);
-		drawContours( drawing, contours, (contours.size()-2), color, 2, 8, hierarchy, 0);
+//     		drawContours( drawing, contours,(contours.size()-1), contourColor1 , 2, 8, hierarchy, 0);
+//		drawContours( drawing, contours, (contours.size()-2), contourColor2 , 2, 8, hierarchy, 0);
 
-		cv::imwrite("contourImage.jpg", drawing);
+//		cv::imwrite("contourImage.jpg", drawing);
+		if(!(contours.size() < 2)) {
+			if(contourArea(contours.at(contours.size()-2)) > 300) {
+				vector<vector<Point> > finalcontours;
+				finalcontours.resize(2);
+				//do identification of target here... Currently grabs the two largest targets that pass thresholding
+				finalcontours.at(0) = contours.at(contours.size()-1);
+				finalcontours.at(1) = contours.at(contours.size()-2);
 
-		if(!(contours.size() < 2))
-		{
-			vector<vector<Point> > finalcontours;
-			finalcontours.resize(2);
-			//do identification of target here... Currently grabs the two largest targets that pass thresholding
-			finalcontours.at(0) = contours.at(contours.size()-1);
-			finalcontours.at(1) = contours.at(contours.size()-2);
-
-			cout << (getCenteredX(finalcontours) - (hsvimage.size().width/2)) << endl;
-		        netTable->PutNumber("area",(getCenteredX(contours) - (hsvimage.size().width/2)));
-		        netTable ->PutNumber("notOld", 1);
+				cerr << (getCenteredX(finalcontours) - (hsvimage.size().width/2)) << endl;
+				globalX = (getCenteredX(finalcontours) - (hsvimage.size().width/2));
+			        netTable->PutNumber("xPos",(getCenteredX(contours) - (hsvimage.size().width/2)));
+			        notOld = 1;
+				netTable ->PutNumber("notOld", 1);
+			}
+			else {
+				cerr << "Did not find large enough contours" << endl;
+		        	netTable->PutNumber("notOld", 0);
+				notOld = 0;
+			}
 		}
-		else
-		{
-		cout << "Did not find two contours" << endl;
-	        netTable->PutNumber("notOld", 0);
+		else {
+			cerr <<  "Did not find two contours" << endl;
+			netTable->PutNumber("notOld", 0);
+			notOld = 0;
 		}
 	}
 }
 
-int getCenteredX(vector<vector<Point> > twoContours)
+void sendData()
 {
+	while(true)
+	{
+		char buff[6];
+		while(read(fd, buff, sizeof buff));
+		buff[0] = 0xFF & globalX;
+		buff[1] = ((0xFF << 8)&globalX)>>8;
+		buff[2] = ((0xFF << 16)&globalX)>>16;
+		buff[3] = ((0xFF << 24)&globalX)>>24;
+		buff[4] = notOld;
+	}
+}
+
+int getCenteredX(vector<vector<Point> > twoContours) {
 	int leftContourRightx = getLeftmost(twoContours.at(0)).x;
 	int rightContourLeftx = getLeftmost(twoContours.at(1)).x;
-	if(leftContourRightx > rightContourLeftx)
-	{
+	if(leftContourRightx > rightContourLeftx) {
 		std::iter_swap(twoContours.begin(), twoContours.begin()+1);
 		rightContourLeftx = leftContourRightx;
 		leftContourRightx = getRightmost(twoContours.at(0)).x;
 	}
-	else
-	{
+	else {
 	leftContourRightx = getRightmost(twoContours.at(0)).x;
 	}
 
@@ -150,15 +193,15 @@ bool compareContourAreas ( std::vector<cv::Point> contour1, std::vector<cv::Poin
 
 Point getLeftmost(vector<cv::Point> contour)
 {
-return *min_element(contour.begin(), contour.end(), 
+	return *min_element(contour.begin(), contour.end(), 
                       [](const Point& lhs, const Point& rhs) {
                           return lhs.x < rhs.x;
-                  }); 
+                  });
 }
 
 Point getRightmost(vector<cv::Point> contour)
 {
-return *max_element(contour.begin(), contour.end(),
+	return *max_element(contour.begin(), contour.end(),
                       [](const Point& lhs, const Point& rhs) {
                           return lhs.x < rhs.x;
 		});
@@ -166,7 +209,7 @@ return *max_element(contour.begin(), contour.end(),
 
 Point getTopmost(vector<cv::Point> contour)
 {
-return *min_element(contour.begin(), contour.end(), 
+	return *min_element(contour.begin(), contour.end(), 
                       [](const Point& lhs, const Point& rhs) {
                           return lhs.y < rhs.y;
 		});
@@ -174,8 +217,63 @@ return *min_element(contour.begin(), contour.end(),
 
 Point getBotmost(vector<cv::Point> contour)
 {
-return *max_element(contour.begin(), contour.end(),
+	return *max_element(contour.begin(), contour.end(),
                       [](const Point& lhs, const Point& rhs) {
                           return lhs.y < rhs.y;
                   });
+}
+
+int set_interface_attribs (int fd, int speed, int parity) {
+        struct termios tty;
+        memset (&tty, 0, sizeof tty);
+        if (tcgetattr (fd, &tty) != 0)
+        {
+                cerr << "error "<< errno << " from tcgetattr"<< endl;
+                return -1;
+        }
+
+        cfsetospeed (&tty, speed);
+        cfsetispeed (&tty, speed);
+
+        tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;     // 8-bit chars
+        // disable IGNBRK for mismatched speed tests; otherwise receive break
+        // as \000 chars
+        tty.c_iflag &= ~IGNBRK;         // disable break processing
+        tty.c_lflag = 0;                // no signaling chars, no echo,
+                                        // no canonical processing
+        tty.c_oflag = 0;                // no remapping, no delays
+        tty.c_cc[VMIN]  = 0;            // read doesn't block
+        tty.c_cc[VTIME] = 5;            // 0.5 seconds read timeout
+
+        tty.c_iflag &= ~(IXON | IXOFF | IXANY); // shut off xon/xoff ctrl
+
+        tty.c_cflag |= (CLOCAL | CREAD);// ignore modem controls,
+                                        // enable reading
+        tty.c_cflag &= ~(PARENB | PARODD);      // shut off parity
+        tty.c_cflag |= parity;
+        tty.c_cflag &= ~CSTOPB;
+        tty.c_cflag &= ~CRTSCTS;
+
+        if (tcsetattr (fd, TCSANOW, &tty) != 0)
+        {
+                cerr << "error " << errno << " from tcsetattr"<< endl;
+                return -1;
+        }
+        return 0;
+}
+
+void set_blocking (int fd, int should_block) {
+        struct termios tty;
+        memset (&tty, 0, sizeof tty);
+        if (tcgetattr (fd, &tty) != 0) {
+                cerr << "error " << errno << " from tggetattr"<< endl;
+                return;
+        }
+
+        tty.c_cc[VMIN]  = should_block ? 1 : 0;
+        tty.c_cc[VTIME] = 5;            // 0.5 seconds read timeout
+
+        if (tcsetattr (fd, TCSANOW, &tty) != 0) {
+                cerr << "error " << errno << " setting term attributes" << endl;
+	}
 }

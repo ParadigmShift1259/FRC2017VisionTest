@@ -45,6 +45,18 @@ stdio.h
 -
 thread
 -
+errno.h
+-
+fcntl.h
+-
+string.h
+-
+termios.h
+-
+unistd.h
+-
+stdint.h
+-
 
 /usr/local/include/llvm/AlignOf.h
 llvm/Compiler.h
