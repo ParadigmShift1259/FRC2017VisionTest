@@ -43,11 +43,13 @@ vector<vector<Point> > contours;
 vector<Vec4i> hierarchy;
 Mat drawing;
 
+
 Scalar contourColor1 = Scalar(124,252,0);
 Scalar contourColor2 = Scalar(180,105,255);
-
-int set_interface_attribs(int fd, int speed, int parity);
-void set_blocking(int fd, int should_block);
+double xOffDistance = 0;
+double xSpread = 0;
+//int set_interface_attribs(int fd, int speed, int parity);
+//void set_blocking(int fd, int should_block);
 
 void grabframe();
 //draws 2 largest contours and returns said two largest contours in a vector of contours
@@ -64,24 +66,26 @@ int getCenteredX(vector<vector<Point> > twoContours);
 void sendData();
 
 int main() {
+	Camera.set(CV_CAP_PROP_GAIN, 1);
+	Camera.set(CV_CAP_PROP_EXPOSURE, 1);
 	Camera.open();
+
 	for(int i = 0; i < 20; i++) {
 		Camera.grab();
 	}
 	Camera.retrieve(frame);
-//	cv::imwrite("firstframe.jpg",frame);
 	NetworkTable::SetClientMode();
 	NetworkTable::SetIPAddress("roboRIO-1259-FRC.local");
 	netTable = NetworkTable::GetTable("OpenCV");
-	int fd = open (portname, O_RDWR | O_NOCTTY | O_SYNC);
-	if (fd < 0)
-	{
-        	cerr << "error " << errno << " opening :" << portname << strerror(errno);
-        	return -1;
-	}
+	//int fd = open (portname, O_RDWR | O_NOCTTY | O_SYNC);
+	//if (fd < 0)
+	//{
+        //	cerr << "error " << errno << " opening :" << portname << strerror(errno);
+        //	return -1;
+	//}
 
-	set_interface_attribs (fd, B115200, 0);  // set speed to 115,200 bps, 8n1 (no parity)
-	set_blocking (fd, 0);                // set no blocking
+	//set_interface_attribs (fd, B115200, 0);  // set speed to 115,200 bps, 8n1 (no parity)
+	//set_blocking (fd, 0);                // set no blocking
 
 	if(Camera.isOpened()){
 		thread first (grabframe);
@@ -113,8 +117,8 @@ void contouringstuffs() {
 		blur(frame,frame,Size(3,3));
 		cvtColor(frame, hsvimage, CV_BGR2HSV);
 		inRange(hsvimage, lower, upper, inrange);
-//		cv::imwrite("rapspicam1.jpg", frame);
-//		cv::imwrite("raspicam_pic.jpg",inrange);
+		cv::imwrite("rapspicam1.jpg", frame);
+		cv::imwrite("raspicam_pic.jpg",inrange);
 
 		findContours(inrange, contours, hierarchy, RETR_LIST, CHAIN_APPROX_SIMPLE);
 
@@ -122,10 +126,10 @@ void contouringstuffs() {
 		//Returns array sorted smallest to biggest
 		std::sort(contours.begin(), contours.end(), compareContourAreas);
 
-//     		drawContours( drawing, contours,(contours.size()-1), contourColor1 , 2, 8, hierarchy, 0);
-//		drawContours( drawing, contours, (contours.size()-2), contourColor2 , 2, 8, hierarchy, 0);
+     		drawContours( drawing, contours,(contours.size()-1), contourColor1 , 2, 8, hierarchy, 0);
+		drawContours( drawing, contours, (contours.size()-2), contourColor2 , 2, 8, hierarchy, 0);
 
-//		cv::imwrite("contourImage.jpg", drawing);
+		cv::imwrite("contourImage.jpg", drawing);
 		if(!(contours.size() < 2)) {
 			if(contourArea(contours.at(contours.size()-2)) > 300) {
 				vector<vector<Point> > finalcontours;
@@ -133,22 +137,17 @@ void contouringstuffs() {
 				//do identification of target here... Currently grabs the two largest targets that pass thresholding
 				finalcontours.at(0) = contours.at(contours.size()-1);
 				finalcontours.at(1) = contours.at(contours.size()-2);
-
-				cerr << (getCenteredX(finalcontours) - (hsvimage.size().width/2)) << endl;
-				globalX = (getCenteredX(finalcontours) - (hsvimage.size().width/2));
-			        netTable->PutNumber("xPos",(getCenteredX(contours) - (hsvimage.size().width/2)));
+				xOffDistance = (getCenteredX(finalcontours) - (hsvimage.size().width/2)); 
+				cerr << xOffDistance << endl;
 			        notOld = 1;
-				netTable ->PutNumber("notOld", 1);
 			}
 			else {
 				cerr << "Did not find large enough contours" << endl;
-		        	netTable->PutNumber("notOld", 0);
 				notOld = 0;
 			}
 		}
 		else {
 			cerr <<  "Did not find two contours" << endl;
-			netTable->PutNumber("notOld", 0);
 			notOld = 0;
 		}
 	}
@@ -156,16 +155,17 @@ void contouringstuffs() {
 
 void sendData()
 {
-	while(true)
+	if(notOld)
 	{
-		char buff[6];
-		while(read(fd, buff, sizeof buff));
-		buff[0] = 0xFF & globalX;
-		buff[1] = ((0xFF << 8)&globalX)>>8;
-		buff[2] = ((0xFF << 16)&globalX)>>16;
-		buff[3] = ((0xFF << 24)&globalX)>>24;
-		buff[4] = notOld;
+		netTable->PutNumber("xPos",xOffDistance);
+		netTable->PutNumber("xSpread",xSpread);
+		netTable ->PutNumber("notOld", 1);
 	}
+	else
+	{
+		netTable ->PutNumber("notOld", 0);
+	}
+
 }
 
 int getCenteredX(vector<vector<Point> > twoContours) {
@@ -179,8 +179,8 @@ int getCenteredX(vector<vector<Point> > twoContours) {
 	else {
 	leftContourRightx = getRightmost(twoContours.at(0)).x;
 	}
-
-	return (leftContourRightx + ((rightContourLeftx - leftContourRightx)/2));
+	xSpread = (rightContourLeftx - leftContourRightx);
+	return (leftContourRightx + xSpread/2);
 }
 
 
@@ -222,7 +222,7 @@ Point getBotmost(vector<cv::Point> contour)
                           return lhs.y < rhs.y;
                   });
 }
-
+/*
 int set_interface_attribs (int fd, int speed, int parity) {
         struct termios tty;
         memset (&tty, 0, sizeof tty);
@@ -277,3 +277,4 @@ void set_blocking (int fd, int should_block) {
                 cerr << "error " << errno << " setting term attributes" << endl;
 	}
 }
+*/
