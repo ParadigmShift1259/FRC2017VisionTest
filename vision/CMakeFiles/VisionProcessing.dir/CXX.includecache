@@ -57,6 +57,10 @@ unistd.h
 -
 stdint.h
 -
+atomic
+-
+math.h
+-
 
 /usr/local/include/llvm/AlignOf.h
 llvm/Compiler.h
